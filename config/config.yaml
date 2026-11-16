@@ -1,0 +1,67 @@
+# Institutional-Grade Breakout Screener Configuration
+# Indian Equities - NSE F&O Universe
+
+app:
+  name: "NSE Breakout Quant Screener"
+  version: "1.0.0"
+  env: "production"
+  timezone: "Asia/Kolkata"
+  log_level: "INFO"
+
+market:
+  exchange: "NSE"
+  trading_start: "09:15:00"
+  trading_end: "15:30:00"
+  pre_market_time: "09:10:00"
+  eod_summary_time: "15:45:00"
+  history_refresh_time: "16:30:00"
+  skip_holidays: true
+
+scanner:
+  poll_interval_sec: 45
+  batch_concurrency: 12
+  request_timeout_sec: 10
+  retry_attempts: 3
+  retry_backoff_sec: 2.0
+  circuit_breaker_error_threshold: 5
+  circuit_breaker_cooldown_sec: 120
+  stale_data_max_age_sec: 300  # 5 minutes
+
+signals:
+  trigger_mode: "ltp_above"   # Options: "intraday_touch", "ltp_above", "candle_close"
+  donchian_lookback_days: 50
+  high_52w_lookback_days: 252
+  exclude_today_from_history: true
+  min_price: 20.0             # Exclude penny stocks
+  max_price: 150000.0
+  min_avg_volume_20d: 50000   # Min 20-day average daily volume
+  min_turnover_cr: 5.0        # Min 5 Crore INR daily turnover
+  min_rvol: 1.0               # Relative volume >= 1.0 (1.0 = equal to 20D average)
+  max_distance_from_level_pct: 3.5  # Ignore breakout if price already gapped > 3.5% above level
+  min_distance_above_level_pct: 0.05 # Minimum 0.05% clearance above breakout level
+  require_volume_confirmation: false # Strict intraday volume check if true
+  require_supertrend_bullish: false  # If true, require Supertrend bullish confirmation
+  supertrend:
+    period: 10
+    multiplier_fast: 1.0             # ST(10, 1)
+    multiplier_slow: 2.0             # ST(10, 2)
+    timeframes: ["daily", "15m"]
+
+validation:
+  enable_cross_validation: true
+  max_ltp_divergence_pct: 1.0       # Skip alert if NSE & Yahoo differ by > 1.0%
+  corporate_action_gap_threshold_pct: 20.0 # Re-pull history if gap > 20% on ex-date
+
+alerts:
+  deduplicate_per_day: true
+  allow_re_alert_on_new_high: true
+  re_alert_threshold_pct: 1.5       # Re-alert if stock reaches +1.5% higher than previous alert
+  near_breakout_threshold_pct: 1.0  # Used for 09:10 pre-market watchlist (<1% from level)
+  rate_limit_per_second: 20
+  max_telegram_retries: 4
+
+universe:
+  cache_ttl_hours: 24
+  auto_refresh_on_startup: true
+  source_url: "https://archives.nseindia.com/content/fo/fo_mktlots.csv"
+  fallback_to_curated_list: true
