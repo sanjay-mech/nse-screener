@@ -91,34 +91,48 @@ def format_premarket_summary(near_stocks: List[Tuple[str, str, float, float]]) -
 
 
 def format_eod_summary(
-    all_alerts: List[BreakoutSignal],
-    close_confirmed_symbols: List[str]
+    all_alerts: List[Any],
+    close_confirmed_symbols: List[str],
+    confirmed_details: Optional[List[Tuple[Any, float]]] = None,
+    retraced_details: Optional[List[Tuple[Any, float]]] = None
 ) -> str:
     """
     Format 15:45 IST End-Of-Day breakout summary with close confirmation.
+    Properly distinguishes between BUY breakouts (close > level) and SELL breakdowns (close < level).
     """
     now_ist = datetime.now(KOLKATA_TZ).strftime("%d-%b-%Y")
     total = len(all_alerts)
+    confirmed_count = len(confirmed_details) if confirmed_details is not None else len(close_confirmed_symbols)
 
     lines = [
         f"📊 <b>END-OF-DAY BREAKOUT REPORT | NSE F&O</b>",
         f"Date: <b>{now_ist}</b>",
-        f"Total Breakouts Today: <b>{total}</b>",
-        f"Close Confirmed: <b>{len(close_confirmed_symbols)}</b>\n"
+        f"Total Alerts Today: <b>{total}</b>",
+        f"Close Confirmed: <b>{confirmed_count}</b>\n"
     ]
 
     if not all_alerts:
-        lines.append("No stocks broke ATH, 52W, or DC50 today.")
+        lines.append("No stocks broke ATH, 52W, DC50, or Supertrend today.")
         return "\n".join(lines)
 
-    lines.append("<b>✅ Close-Confirmed Breakouts:</b>")
-    if close_confirmed_symbols:
-        for sym in close_confirmed_symbols:
-            lines.append(f"• <b>{sym}</b> (Closed above prior high)")
+    lines.append("<b>✅ Close-Confirmed Moves:</b>")
+    if confirmed_details:
+        for a, close_p in confirmed_details[:20]:
+            sym = a.symbol
+            trig = getattr(a, "trigger_label", getattr(a, "trigger_types", "BREAKOUT"))
+            side = getattr(a, "side", "BUY")
+            lvl = a.level_broken
+            if side == "BUY":
+                lines.append(f"• <b>{sym}</b> ({trig}) - Closed @ ₹{close_p:,.2f} (Held above ₹{lvl:,.2f})")
+            else:
+                lines.append(f"• <b>{sym}</b> ({trig}) - Closed @ ₹{close_p:,.2f} (Held below ₹{lvl:,.2f})")
+    elif close_confirmed_symbols:
+        for sym in close_confirmed_symbols[:20]:
+            lines.append(f"• <b>{sym}</b> (Confirmed at close)")
     else:
-        lines.append("<i>None closed strictly above breakout level.</i>")
+        lines.append("<i>None closed confirming their breakout/breakdown level.</i>")
 
-    lines.append("\n<b>⚡ Today's Intraday Breakouts:</b>")
+    lines.append("\n<b>⚡ Today's Intraday Alerts & Status:</b>")
     seen_breakouts = set()
     for sig in all_alerts[:30]:
         sym = sig.symbol

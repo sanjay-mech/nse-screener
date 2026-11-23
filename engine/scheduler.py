@@ -252,21 +252,56 @@ class ScreenerEngine:
             return
 
         logger.info("Generating 15:45 End-Of-Day summary...")
+        # Authoritative persistent record of all alerts triggered today
         today_alerts = await self.repo.get_alerts_by_date(today)
-        close_confirmed: List[str] = []
+        if not today_alerts:
+            today_alerts = state_manager.get_today_signals(today)
 
-        # Validate which breakouts closed strictly above their breakout levels
+        # Deduplicate alerts by (symbol, trigger_types) to avoid double-counting
+        unique_alerts_map: Dict[Tuple[str, str], Any] = {}
         for a in today_alerts:
-            latest_tick = state_manager.latest_ticks.get(a.symbol)
-            if latest_tick and latest_tick.ltp > a.level_broken:
-                close_confirmed.append(a.symbol)
-                await self.repo.update_alert_confirmed_close(a.symbol, today, confirmed=True)
+            sym = a.symbol
+            trig = getattr(a, "trigger_types", getattr(a, "trigger_label", "BREAKOUT"))
+            key = (sym, trig)
+            if key not in unique_alerts_map:
+                unique_alerts_map[key] = a
 
-        close_confirmed = list(dict.fromkeys(close_confirmed))
-        # Strictly use today's signals or today's DB records, never multi-day accumulation
-        today_signals = state_manager.get_today_signals(today)
-        alerts_to_report = today_signals if today_signals else today_alerts
-        msg = format_eod_summary(alerts_to_report, close_confirmed)
+        unique_alerts = list(unique_alerts_map.values())
+        confirmed_details: List[Tuple[Any, float]] = []
+        retraced_details: List[Tuple[Any, float]] = []
+        close_confirmed_symbols: List[str] = []
+
+        # Validate candle-close confirmation based on side (BUY > level, SELL < level)
+        for a in unique_alerts:
+            sym = a.symbol
+            side = getattr(a, "side", "BUY")
+            lvl = a.level_broken
+            latest_tick = state_manager.latest_ticks.get(sym)
+            current_close = latest_tick.ltp if latest_tick else a.ltp
+
+            # Institutional validation:
+            # - BUY breakout is confirmed if price closed STRICTLY ABOVE the breakout level
+            # - SELL breakdown is confirmed if price closed STRICTLY BELOW the breakdown level
+            if side == "BUY":
+                is_confirmed = current_close > lvl
+            else:
+                is_confirmed = current_close < lvl
+
+            if is_confirmed:
+                confirmed_details.append((a, current_close))
+                close_confirmed_symbols.append(sym)
+                await self.repo.update_alert_confirmed_close(sym, today, confirmed=True)
+            else:
+                retraced_details.append((a, current_close))
+                await self.repo.update_alert_confirmed_close(sym, today, confirmed=False)
+
+        close_confirmed_symbols = list(dict.fromkeys(close_confirmed_symbols))
+        msg = format_eod_summary(
+            all_alerts=unique_alerts,
+            close_confirmed_symbols=close_confirmed_symbols,
+            confirmed_details=confirmed_details,
+            retraced_details=retraced_details
+        )
         await self.bot.broadcast_alert(msg)
 
     async def daily_reset(self) -> None:

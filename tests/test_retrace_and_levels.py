@@ -49,60 +49,68 @@ def test_retrace_alert_formatting():
 
 
 def test_eod_summary_strictly_scoped_to_today():
-    """Verify that only today's alerts are included and accurately tagged as Confirmed or Retraced."""
+    """Verify that only today's alerts are included and accurately tagged as Confirmed or Retraced for BUY and SELL."""
     now = datetime.now(KOLKATA_TZ)
-    sig_today = BreakoutSignal(
-        symbol="RELIANCE",
-        ltp=3100.0,
-        pct_change=2.5,
-        level_broken=3050.0,
-        pct_above=1.64,
-        triggers=[TriggerType.ATH],
-        trigger_label="ATH",
-        prior_high_date="2024-01-01",
-        rvol=2.0,
-        atr_20=40.0,
-        sector="Energy",
+    sig_buy = BreakoutSignal(
+        symbol="LAURUSLABS",
+        ltp=2378.90,
+        pct_change=3.7,
+        level_broken=2377.97,
+        pct_above=0.04,
+        triggers=[TriggerType.ST_DAILY_10_1_BUY],
+        trigger_label="ST_DAILY_10_1_BUY",
+        prior_high_date=None,
+        rvol=1.5,
+        atr_20=25.0,
+        sector="Pharma",
         ban_status="NORMAL",
         timestamp=now,
         trigger_mode="ltp_above",
         volume=500000,
-        turnover_cr=150.0,
+        turnover_cr=118.0,
         side="BUY",
-        trigger=TriggerType.ATH,
-        title="ATH BREAKOUT"
+        trigger=TriggerType.ST_DAILY_10_1_BUY,
+        title="ST DAILY (10,1) BUY FLIP"
     )
 
-    sig_retrace = BreakoutSignal(
-        symbol="BSE",
-        ltp=3750.0,
-        pct_change=-3.2,
-        level_broken=4003.3,
-        pct_above=-6.33,
-        triggers=[TriggerType.DC50_HIGH],
-        trigger_label="DC50_HIGH",
-        prior_high_date="2026-11-17",
+    sig_sell = BreakoutSignal(
+        symbol="ANANDRATHI",
+        ltp=2355.90,
+        pct_change=-0.8,
+        level_broken=2353.51,
+        pct_above=0.1,
+        triggers=[TriggerType.ST_DAILY_10_1_SELL],
+        trigger_label="ST_DAILY_10_1_SELL",
+        prior_high_date=None,
         rvol=1.1,
-        atr_20=75.0,
+        atr_20=45.0,
         sector="Capital Markets",
         ban_status="NORMAL",
         timestamp=now,
         trigger_mode="ltp_above",
         volume=200000,
-        turnover_cr=75.0,
-        side="BUY",
-        trigger=TriggerType.DC50_HIGH,
-        title="DC50 BREAKOUT"
+        turnover_cr=47.0,
+        side="SELL",
+        trigger=TriggerType.ST_DAILY_10_1_SELL,
+        title="ST DAILY (10,1) SELL FLIP"
     )
 
-    # RELIANCE closed confirmed above level, BSE closed below level (retraced)
-    close_confirmed = ["RELIANCE"]
-    summary = format_eod_summary([sig_today, sig_retrace], close_confirmed)
+    # LAURUSLABS is BUY: close (2378.90) > level (2377.97) -> CONFIRMED!
+    # ANANDRATHI is SELL: close (2355.90) > level (2353.51) -> BOUNCED / RETRACED (NOT confirmed)!
+    confirmed_details = [(sig_buy, 2378.90)]
+    close_confirmed = ["LAURUSLABS"]
+    summary = format_eod_summary(
+        all_alerts=[sig_buy, sig_sell],
+        close_confirmed_symbols=close_confirmed,
+        confirmed_details=confirmed_details
+    )
 
-    assert "RELIANCE" in summary
-    assert "Closed above prior high" in summary
-    assert "• <b>RELIANCE</b> (ATH) - ✅ Confirmed" in summary
-    assert "• <b>BSE</b> (DC50_HIGH) - ⚠️ Retraced" in summary
+    assert "LAURUSLABS" in summary
+    assert "Held above ₹2,377.97" in summary
+    assert "• <b>LAURUSLABS</b> (ST_DAILY_10_1_BUY) - ✅ Confirmed" in summary
+    # ANANDRATHI did NOT close below its sell level, so it is Retraced!
+    assert "• <b>ANANDRATHI</b> (ST_DAILY_10_1_SELL) - ⚠️ Retraced" in summary
+    assert "Closed above prior high" not in summary
 
 
 def test_state_manager_daily_scoping():
