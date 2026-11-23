@@ -134,13 +134,23 @@ def format_eod_summary(
 
     lines.append("\n<b>⚡ Today's Intraday Alerts & Status:</b>")
     seen_breakouts = set()
+    confirmed_keys = set()
+    if confirmed_details:
+        for a, _ in confirmed_details:
+            s_sym = getattr(a, "symbol", "")
+            s_trig = getattr(a, "trigger_label", getattr(a, "trigger_types", "BREAKOUT"))
+            confirmed_keys.add((s_sym, s_trig))
+
     for sig in all_alerts[:30]:
         sym = sig.symbol
         trig = getattr(sig, "trigger_label", getattr(sig, "trigger_types", "BREAKOUT"))
         if (sym, trig) in seen_breakouts:
             continue
         seen_breakouts.add((sym, trig))
-        status = "✅ Confirmed" if sym in close_confirmed_symbols else "⚠️ Retraced"
+        if confirmed_details is not None:
+            status = "✅ Confirmed" if (sym, trig) in confirmed_keys else "⚠️ Retraced"
+        else:
+            status = "✅ Confirmed" if sym in close_confirmed_symbols else "⚠️ Retraced"
         lines.append(f"• <b>{sym}</b> ({trig}) - {status}")
 
     return "\n".join(lines)
