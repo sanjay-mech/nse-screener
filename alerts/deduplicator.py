@@ -5,12 +5,15 @@ while allowing optional re-alerts if the stock continues to rally (+X% above pri
 Survives process restarts via persistent database storage.
 """
 
-from datetime import date
+from datetime import date, datetime
 from typing import Dict, Tuple, Optional
+import pytz
 from loguru import logger
 from config.settings import settings
 from signals.models import BreakoutSignal
 from storage.repository import Repository
+
+KOLKATA_TZ = pytz.timezone(settings.TIMEZONE)
 
 
 class AlertDeduplicator:
@@ -20,10 +23,13 @@ class AlertDeduplicator:
         self._cache: Dict[Tuple[str, date, str], float] = {}
         self._initialized: bool = False
 
+    def _get_current_date(self) -> date:
+        return datetime.now(KOLKATA_TZ).date()
+
     async def warm_up(self, today: Optional[date] = None) -> None:
         """Load today's already dispatched alerts from DB into cache."""
         if today is None:
-            today = date.today()
+            today = self._get_current_date()
 
         try:
             db_alerts = await self.repo.get_alerts_by_date(today)
@@ -46,7 +52,7 @@ class AlertDeduplicator:
             return True, "Deduplication disabled"
 
         if today is None:
-            today = date.today()
+            today = self._get_current_date()
 
         key = (signal.symbol, today, signal.trigger_label)
 
@@ -81,6 +87,6 @@ class AlertDeduplicator:
     def record_alert_dispatched(self, signal: BreakoutSignal, today: Optional[date] = None) -> None:
         """Update cache upon successful dispatch."""
         if today is None:
-            today = date.today()
+            today = self._get_current_date()
         key = (signal.symbol, today, signal.trigger_label)
         self._cache[key] = max(self._cache.get(key, 0.0), signal.ltp)

@@ -28,7 +28,9 @@ class YahooClient:
         self, tickers: List[str], period: str = "max"
     ) -> Dict[str, pd.DataFrame]:
         """
-        Synchronous batch downloader using yfinance with auto_adjust=True.
+        Synchronous batch downloader using yfinance with auto_adjust=False.
+        Using auto_adjust=False preserves true nominal traded prices (adjusted for splits/bonuses,
+        NOT degraded by cash dividends), ensuring accurate ATH and 52W High breakout detection.
         """
         if not tickers:
             return {}
@@ -44,7 +46,7 @@ class YahooClient:
                     tickers=ticker_str,
                     period=period,
                     interval="1d",
-                    auto_adjust=True,
+                    auto_adjust=False,
                     group_by="ticker",
                     progress=False,
                     threads=True
@@ -105,7 +107,7 @@ class YahooClient:
                 tickers=" ".join(chunk),
                 period="1d",
                 interval="5m",
-                auto_adjust=True,
+                auto_adjust=False,
                 group_by="ticker",
                 progress=False,
                 threads=True
@@ -240,7 +242,7 @@ class YahooClient:
                     tickers=ticker_str,
                     period=period,
                     interval="15m",
-                    auto_adjust=True,
+                    auto_adjust=False,
                     group_by="ticker",
                     progress=False,
                     threads=True

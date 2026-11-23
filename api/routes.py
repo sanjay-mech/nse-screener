@@ -7,6 +7,7 @@ levels lookup, alert logs, and operational controls.
 from datetime import date, datetime
 import json
 from typing import Dict, Any, List, Optional
+import pytz
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from config.settings import settings
@@ -18,6 +19,8 @@ from engine.state_manager import state_manager
 from data.holiday_calendar import holiday_calendar
 from data.sectors import get_stock_sector
 from api.auth import verify_token
+
+KOLKATA_TZ = pytz.timezone(settings.TIMEZONE)
 
 router = APIRouter()
 repo = Repository()
@@ -65,7 +68,7 @@ async def get_signals(
     authorized: bool = Depends(verify_token)
 ) -> Dict[str, Any]:
     """Retrieve today's active breakout signals (latest alerts) and near-breakout candidates."""
-    today = date.today()
+    today = datetime.now(KOLKATA_TZ).date()
     alerts = await repo.get_alerts_by_date(today)
     latest_alerts = alerts[:limit]
 
@@ -91,26 +94,39 @@ async def get_signals(
 
     near_breakouts.sort(key=lambda x: x["distance_pct"])
 
+    breakout_items = []
+    for a in latest_alerts:
+        curr_tick = state_manager.latest_ticks.get(a.symbol)
+        curr_ltp = curr_tick.ltp if curr_tick else a.ltp
+        curr_change = curr_tick.p_change if curr_tick else a.pct_change
+        is_buy = getattr(a, "side", "BUY") == "BUY"
+        is_holding = curr_ltp >= a.level_broken if is_buy else curr_ltp <= a.level_broken
+        live_dist = round(((curr_ltp - a.level_broken) / a.level_broken) * 100, 2) if a.level_broken > 0 else 0.0
+
+        breakout_items.append({
+            "symbol": a.symbol,
+            "trigger_types": a.trigger_types,
+            "side": getattr(a, "side", "BUY"),
+            "ltp": curr_ltp,
+            "alert_ltp": a.ltp,
+            "pct_change": curr_change,
+            "level_broken": a.level_broken,
+            "pct_above": live_dist,
+            "alert_pct_above": a.pct_above,
+            "is_holding": is_holding,
+            "holding_status": "HOLDING" if is_holding else "RETRACED",
+            "prior_high_date": a.prior_high_date,
+            "rvol": curr_tick.volume if curr_tick else a.rvol,
+            "atr_20": a.atr_20,
+            "sector": a.sector if (a.sector and a.sector != "N/A") else get_stock_sector(a.symbol),
+            "time": a.alert_time.isoformat(),
+            "confirmed_close": a.confirmed_close
+        })
+
     return {
         "date": str(today),
         "today_breakouts_count": len(alerts),
-        "breakouts": [
-            {
-                "symbol": a.symbol,
-                "trigger_types": a.trigger_types,
-                "ltp": a.ltp,
-                "pct_change": a.pct_change,
-                "level_broken": a.level_broken,
-                "pct_above": a.pct_above,
-                "prior_high_date": a.prior_high_date,
-                "rvol": a.rvol,
-                "atr_20": a.atr_20,
-                "sector": a.sector if (a.sector and a.sector != "N/A") else get_stock_sector(a.symbol),
-                "time": a.alert_time.isoformat(),
-                "confirmed_close": a.confirmed_close
-            }
-            for a in latest_alerts
-        ],
+        "breakouts": breakout_items,
         "near_breakouts": near_breakouts
     }
 
@@ -166,7 +182,8 @@ async def get_alerts(
     authorized: bool = Depends(verify_token)
 ) -> List[Dict[str, Any]]:
     """Retrieve historical alert log."""
-    records = await repo.get_alerts_by_date(date.today())
+    today = datetime.now(KOLKATA_TZ).date()
+    records = await repo.get_alerts_by_date(today)
     return [
         {
             "id": r.id,
@@ -242,12 +259,33 @@ async def get_table_data(
         dist_dc50 = round(((ltp - lvl.donchian_50_high) / lvl.donchian_50_high) * 100.0, 2) if lvl.donchian_50_high > 0 else -100.0
 
         status = "NORMAL"
+        is_retraced = False
+        retrace_type = None
+
         if dist_ath >= 0:
             status = "ATH BREAKOUT"
         elif dist_52w >= 0:
             status = "52W BREAKOUT"
         elif dist_dc50 >= 0:
             status = "DC50 BREAKOUT"
+        elif lvl.donchian_20_high > 0 and ltp >= lvl.donchian_20_high:
+            status = "DC20 BREAKOUT"
+        elif lvl.ath_high > 0 and day_high >= lvl.ath_high and ltp < lvl.ath_high:
+            status = "ATH RETRACED"
+            is_retraced = True
+            retrace_type = "ATH"
+        elif lvl.high_52w > 0 and day_high >= lvl.high_52w and ltp < lvl.high_52w:
+            status = "52W RETRACED"
+            is_retraced = True
+            retrace_type = "52W_HIGH"
+        elif lvl.donchian_50_high > 0 and day_high >= lvl.donchian_50_high and ltp < lvl.donchian_50_high:
+            status = "DC50 RETRACED"
+            is_retraced = True
+            retrace_type = "DC50_HIGH"
+        elif lvl.donchian_20_high > 0 and day_high >= lvl.donchian_20_high and ltp < lvl.donchian_20_high:
+            status = "DC20 RETRACED"
+            is_retraced = True
+            retrace_type = "DC20_HIGH"
         elif max(dist_ath, dist_52w, dist_dc50) >= -1.0:
             status = "NEAR BREAKOUT"
 
@@ -256,6 +294,10 @@ async def get_table_data(
         if dist_52w >= 0: matching_triggers.append("52W_HIGH")
         if dist_dc50 >= 0: matching_triggers.append("DC50_HIGH")
         if lvl.donchian_20_high > 0 and ltp >= lvl.donchian_20_high: matching_triggers.append("DC20_HIGH")
+        if is_retraced:
+            matching_triggers.append("RETRACED")
+            if retrace_type:
+                matching_triggers.append(f"{retrace_type}_RETRACED")
         if lvl.atl_low > 0 and ltp <= lvl.atl_low: matching_triggers.append("ATL")
         if lvl.low_52w > 0 and ltp <= lvl.low_52w: matching_triggers.append("52W_LOW")
         if lvl.donchian_50_low > 0 and ltp <= lvl.donchian_50_low: matching_triggers.append("DC50_LOW")

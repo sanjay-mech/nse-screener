@@ -8,11 +8,14 @@ from datetime import date, datetime
 from typing import Optional, Dict
 import numpy as np
 import pandas as pd
+import pytz
 from loguru import logger
 from config.settings import settings
 from signals.models import PrecomputedLevels
 from signals.supertrend import get_latest_supertrend
 from data.sectors import get_stock_sector
+
+KOLKATA_TZ = pytz.timezone(settings.TIMEZONE)
 
 
 def calculate_atr(df: pd.DataFrame, period: int = 20) -> float:
@@ -56,7 +59,7 @@ def compute_levels_for_symbol(
         return None
 
     if as_of_date is None:
-        as_of_date = date.today()
+        as_of_date = datetime.now(KOLKATA_TZ).date()
 
     if sector == "N/A" or not sector:
         sector = get_stock_sector(symbol)

@@ -198,7 +198,8 @@ class TelegramBot:
             await self._outbound_queue.put((chat_id, msg, "HTML"))
 
         elif cmd == "/today":
-            today_alerts = await self.repo.get_alerts_by_date(date.today())
+            today = datetime.now(KOLKATA_TZ).date()
+            today_alerts = await self.repo.get_alerts_by_date(today)
             if not today_alerts:
                 await self._outbound_queue.put(
                     (chat_id, "ℹ️ <i>No breakout signals recorded today yet.</i>", "HTML")

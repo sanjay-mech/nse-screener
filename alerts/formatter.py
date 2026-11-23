@@ -46,11 +46,17 @@ def format_breakout_alert(signal: BreakoutSignal) -> str:
         dist_sign = "+"
 
     dist_val = abs(getattr(signal, "pct_distance", signal.pct_above))
+    is_retraced = (side == "BUY" and signal.ltp < signal.level_broken) or (side == "SELL" and signal.ltp > signal.level_broken)
+    if is_retraced and signal.level_broken > 0:
+        retrace_pct = abs(((signal.ltp - signal.level_broken) / signal.level_broken) * 100.0)
+        level_str = f"Level: <b>₹{signal.level_broken:,.2f}</b> (⚠️ Retraced -{retrace_pct:.1f}%)"
+    else:
+        level_str = f"Level: <b>₹{signal.level_broken:,.2f}</b> ({dist_sign}{dist_val:.1f}%)"
 
     # Clean 3-line institutional separate alert
     msg = (
         f"{icon} <b>{signal.symbol}</b> | <b>{title}</b> ({p_sign}{signal.pct_change:.1f}%)\n"
-        f"LTP: <b>₹{signal.ltp:,.2f}</b> | Level: <b>₹{signal.level_broken:,.2f}</b> ({dist_sign}{dist_val:.1f}%)\n"
+        f"LTP: <b>₹{signal.ltp:,.2f}</b> | {level_str}\n"
         f"Trigger: <b>{side_tag} ({title})</b> | RVOL: <b>{signal.rvol:.1f}x</b> | <i>{now_ist}</i>"
     )
     return msg
@@ -113,9 +119,15 @@ def format_eod_summary(
         lines.append("<i>None closed strictly above breakout level.</i>")
 
     lines.append("\n<b>⚡ Today's Intraday Breakouts:</b>")
-    for sig in all_alerts[:20]:
-        status = "✅ Confirmed" if sig.symbol in close_confirmed_symbols else "⚠️ Retraced"
-        lines.append(f"• <b>{sig.symbol}</b> ({sig.trigger_label}) - {status}")
+    seen_breakouts = set()
+    for sig in all_alerts[:30]:
+        sym = sig.symbol
+        trig = getattr(sig, "trigger_label", getattr(sig, "trigger_types", "BREAKOUT"))
+        if (sym, trig) in seen_breakouts:
+            continue
+        seen_breakouts.add((sym, trig))
+        status = "✅ Confirmed" if sym in close_confirmed_symbols else "⚠️ Retraced"
+        lines.append(f"• <b>{sym}</b> ({trig}) - {status}")
 
     return "\n".join(lines)
 

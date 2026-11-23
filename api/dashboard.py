@@ -248,6 +248,12 @@ DASHBOARD_HTML = """
               <option value="ST_DAILY_10_2_BUY">🟢 ST Daily (10,2) BUY</option>
               <option value="ST_DAILY_10_2_SELL">🔴 ST Daily (10,2) SELL</option>
             </optgroup>
+            <optgroup label="Retrace Screeners">
+              <option value="RETRACED">⚠️ All Retraced Setups</option>
+              <option value="ATH_RETRACED">⚠️ ATH Retraced</option>
+              <option value="52W_HIGH_RETRACED">⚠️ 52W High Retraced</option>
+              <option value="DC50_HIGH_RETRACED">⚠️ DC50 High Retraced</option>
+            </optgroup>
           </select>
         </div>
 
@@ -294,7 +300,8 @@ DASHBOARD_HTML = """
                 <th class="px-4 py-3">LTP</th>
                 <th class="px-4 py-3">% Change</th>
                 <th class="px-4 py-3">Level Broken</th>
-                <th class="px-4 py-3">% Above</th>
+                <th class="px-4 py-3">Live Dist</th>
+                <th class="px-4 py-3">Status</th>
                 <th class="px-4 py-3">Triggers</th>
                 <th class="px-4 py-3">RVOL</th>
                 <th class="px-4 py-3">ATR(20)</th>
@@ -306,15 +313,22 @@ DASHBOARD_HTML = """
               <template x-for="item in filteredBreakouts.slice(0, 50)" :key="item.symbol + item.time">
                 <tr class="hover:bg-dark-700/40 transition font-mono">
                   <td class="px-4 py-3 font-bold text-white flex items-center gap-2">
-                    <span class="text-emerald-400 font-sans">⚡</span>
+                    <span :class="item.is_holding !== false ? 'text-emerald-400' : 'text-amber-400'" class="font-sans" x-text="item.is_holding !== false ? '⚡' : '⚠️'"></span>
                     <span x-text="item.symbol"></span>
                   </td>
                   <td class="px-4 py-3 font-semibold text-emerald-400" x-text="'₹' + item.ltp.toLocaleString('en-IN', {minimumFractionDigits: 2})"></td>
                   <td class="px-4 py-3" :class="item.pct_change >= 0 ? 'text-emerald-400' : 'text-rose-400'" x-text="(item.pct_change > 0 ? '+' : '') + item.pct_change.toFixed(2) + '%'"></td>
                   <td class="px-4 py-3 text-slate-300" x-text="'₹' + item.level_broken.toLocaleString('en-IN', {minimumFractionDigits: 2})"></td>
-                  <td class="px-4 py-3 text-emerald-400 font-bold" x-text="'+' + item.pct_above.toFixed(2) + '%'"></td>
+                  <td class="px-4 py-3 font-bold" :class="item.pct_above >= 0 ? 'text-emerald-400' : 'text-rose-400'" x-text="(item.pct_above >= 0 ? '+' : '') + item.pct_above.toFixed(2) + '%'"></td>
                   <td class="px-4 py-3">
-                    <span class="px-2 py-0.5 rounded text-[10px] font-sans font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30" x-text="item.trigger_types"></span>
+                    <span 
+                      class="px-2 py-0.5 rounded text-[10px] font-sans font-bold"
+                      :class="item.is_holding !== false ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'"
+                      x-text="item.is_holding !== false ? '✅ Holding' : '⚠️ Retraced'">
+                    </span>
+                  </td>
+                  <td class="px-4 py-3">
+                    <span class="px-2 py-0.5 rounded text-[10px] font-sans font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30" x-text="item.trigger_types"></span>
                   </td>
                   <td class="px-4 py-3 font-semibold" :class="item.rvol >= 1.5 ? 'text-amber-400' : 'text-slate-300'" x-text="item.rvol.toFixed(1) + 'x'"></td>
                   <td class="px-4 py-3 text-slate-400" x-text="'₹' + item.atr_20.toFixed(2)"></td>
@@ -323,7 +337,7 @@ DASHBOARD_HTML = """
                 </tr>
               </template>
               <tr x-show="!filteredBreakouts || filteredBreakouts.length === 0">
-                <td colspan="10" class="px-4 py-8 text-center text-slate-400 font-sans">
+                <td colspan="11" class="px-4 py-8 text-center text-slate-400 font-sans">
                   No breakouts triggered yet today.
                 </td>
               </tr>

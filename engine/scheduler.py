@@ -69,7 +69,9 @@ class ScreenerEngine:
         self.bot.resume_callback = lambda: setattr(state_manager, "is_paused", False)
 
         # 2. Warm up deduplicator
-        await self.deduplicator.warm_up(date.today())
+        today = datetime.now(KOLKATA_TZ).date()
+        state_manager.clear_today_signals()
+        await self.deduplicator.warm_up(today)
 
         # 2b. Load saved alert subscriptions
         saved_subs = await self.repo.get_state("ALERT_SUBSCRIPTIONS")
@@ -89,7 +91,6 @@ class ScreenerEngine:
 
         # 4. Check if levels exist in database for today, or compute them
         db_levels = await self.repo.get_all_stock_levels()
-        today = date.today()
         levels_map: Dict[str, PrecomputedLevels] = {}
 
         if db_levels and db_levels[0].calculated_date == today and len(db_levels) >= len(symbols) * 0.8:
@@ -158,7 +159,8 @@ class ScreenerEngine:
         logger.info(f"Rebuilding breakout levels and Supertrend for {len(symbols)} symbols...")
         hist_data = await yahoo_client.fetch_historical_daily(symbols, period="max")
         hist_15m = await yahoo_client.fetch_15m_history(symbols, period="5d")
-        today = date.today()
+        today = datetime.now(KOLKATA_TZ).date()
+        state_manager.clear_today_signals()
 
         levels_list_for_db = []
         levels_map: Dict[str, PrecomputedLevels] = {}
@@ -214,7 +216,8 @@ class ScreenerEngine:
 
     async def send_premarket_alert(self) -> None:
         """09:10 IST Pre-Market Broadcast: stocks within 1% of key levels."""
-        if not holiday_calendar.is_trading_day(date.today()):
+        today = datetime.now(KOLKATA_TZ).date()
+        if not holiday_calendar.is_trading_day(today):
             return
 
         logger.info("Compiling 09:10 pre-market watchlist...")
@@ -244,7 +247,7 @@ class ScreenerEngine:
 
     async def send_eod_summary(self) -> None:
         """15:45 IST End-Of-Day Summary with Candle-Close confirmation."""
-        today = date.today()
+        today = datetime.now(KOLKATA_TZ).date()
         if not holiday_calendar.is_trading_day(today):
             return
 
@@ -259,8 +262,20 @@ class ScreenerEngine:
                 close_confirmed.append(a.symbol)
                 await self.repo.update_alert_confirmed_close(a.symbol, today, confirmed=True)
 
-        msg = format_eod_summary(state_manager.today_signals, close_confirmed)
+        close_confirmed = list(dict.fromkeys(close_confirmed))
+        # Strictly use today's signals or today's DB records, never multi-day accumulation
+        today_signals = state_manager.get_today_signals(today)
+        alerts_to_report = today_signals if today_signals else today_alerts
+        msg = format_eod_summary(alerts_to_report, close_confirmed)
         await self.bot.broadcast_alert(msg)
+
+    async def daily_reset(self) -> None:
+        """Midnight rollover: reset today's signals, cached ticks, and deduplicator for the new date."""
+        today = datetime.now(KOLKATA_TZ).date()
+        logger.info(f"Running daily state rollover for {today}...")
+        state_manager.clear_today_signals()
+        state_manager.clear_ticks()
+        await self.deduplicator.warm_up(today)
 
     async def heartbeat_check(self) -> None:
         """Periodic health check and heartbeat."""
@@ -273,6 +288,13 @@ class ScreenerEngine:
 
     def start_schedules(self) -> None:
         """Configure and start APScheduler cron and interval triggers."""
+        # Midnight daily reset at 00:01 IST (every day)
+        self.scheduler.add_job(
+            self.daily_reset,
+            CronTrigger(hour=0, minute=1, timezone=KOLKATA_TZ),
+            id="job_daily_reset"
+        )
+
         # Pre-open levels rebuild at 08:30 IST (Mon-Fri)
         self.scheduler.add_job(
             self.rebuild_levels,
