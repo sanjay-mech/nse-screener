@@ -4,8 +4,9 @@ Generates rich HTML messages for real-time breakouts, pre-market watchlists,
 EOD summaries, and system heartbeats.
 """
 
+from __future__ import annotations
 from datetime import datetime
-from typing import List, Tuple, Dict
+from typing import List, Tuple, Dict, Any, Optional
 import pytz
 from config.settings import settings
 from signals.models import BreakoutSignal, PrecomputedLevels
