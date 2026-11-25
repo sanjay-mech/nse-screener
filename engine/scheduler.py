@@ -136,9 +136,9 @@ class ScreenerEngine:
         state_manager.health_status = "READY"
         logger.info("Screener Engine warm-up complete.")
 
-        # Immediately execute an initial scan to populate live quotes across active universe (silent warmup)
+        # Immediately execute an initial scan to populate live quotes and catch any active breakouts
         logger.info("Executing initial live market scan...")
-        asyncio.create_task(self.scanner.scan_once(force_execution=True, is_warmup=True))
+        asyncio.create_task(self.scanner.scan_once(force_execution=True, is_warmup=False))
 
     def _get_status_dict(self) -> Dict[str, any]:
         return {

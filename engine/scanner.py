@@ -210,8 +210,8 @@ class BreakoutScanner:
                             "confirmed_close": False
                         })
                     else:
-                        # Silently baseline pre-existing moves so startup never spams historical alerts
-                        self.deduplicator.record_alert_dispatched(signal, today)
+                        # Warmup mode: cache live quotes only, never suppress today's pending alerts
+                        logger.debug(f"[WARMUP] Cached live move for {sym} ({signal.title}) without consuming alert")
 
             duration_ms = (time.time() - start_time) * 1000.0
             state_manager.last_scan_time = datetime.utcnow()
