@@ -24,10 +24,10 @@ class BreakoutDetector:
     def __init__(self):
         self.trigger_mode = settings.TRIGGER_MODE
 
-    def _determine_eval_price(self, tick: PriceTick, mode: str) -> float:
-        """Select price to evaluate based on trigger mode."""
+    def _determine_eval_price(self, tick: PriceTick, mode: str, side: str = "BUY") -> float:
+        """Select price to evaluate based on trigger mode and side."""
         if mode == TriggerMode.INTRADAY_TOUCH.value:
-            return tick.day_high
+            return tick.day_high if side == "BUY" else tick.day_low
         return tick.ltp
 
     def evaluate_breakouts(
@@ -42,10 +42,11 @@ class BreakoutDetector:
         Each triggered condition generates its own distinct BreakoutSignal.
         """
         mode = force_mode or self.trigger_mode
-        price = self._determine_eval_price(tick, mode)
+        buy_price = self._determine_eval_price(tick, mode, "BUY")
+        sell_price = self._determine_eval_price(tick, mode, "SELL")
 
         # 1. Base Price Filter
-        if price < settings.MIN_PRICE or price > settings.MAX_PRICE:
+        if tick.ltp < settings.MIN_PRICE or tick.ltp > settings.MAX_PRICE:
             return []
 
         # 2. Minimum Average Daily Volume Filter
@@ -116,96 +117,76 @@ class BreakoutDetector:
         # BUY / LONG SIDE CONDITIONS (SEPARATE ALERTS)
         # ==========================================
         # 1. ATH Breakout
-        if levels.ath_high > 0 and price > levels.ath_high and tick.p_change >= 0 and did_hit_recent_buy(levels.ath_high):
-            dist = ((price - levels.ath_high) / levels.ath_high) * 100.0
+        if levels.ath_high > 0 and buy_price > levels.ath_high and tick.p_change >= 0 and did_hit_recent_buy(levels.ath_high):
+            dist = ((buy_price - levels.ath_high) / levels.ath_high) * 100.0
             if dist >= settings.MIN_DISTANCE_ABOVE_LEVEL_PCT and dist <= settings.MAX_DISTANCE_FROM_LEVEL_PCT:
                 signals.append(build_sig("BUY", TriggerType.ATH, "ATH BREAKOUT", levels.ath_high, dist))
 
         # 2. 52W High Breakout
-        if levels.high_52w > 0 and price > levels.high_52w and tick.p_change >= 0 and did_hit_recent_buy(levels.high_52w):
-            dist = ((price - levels.high_52w) / levels.high_52w) * 100.0
+        if levels.high_52w > 0 and buy_price > levels.high_52w and tick.p_change >= 0 and did_hit_recent_buy(levels.high_52w):
+            dist = ((buy_price - levels.high_52w) / levels.high_52w) * 100.0
             if dist >= settings.MIN_DISTANCE_ABOVE_LEVEL_PCT and dist <= settings.MAX_DISTANCE_FROM_LEVEL_PCT:
                 signals.append(build_sig("BUY", TriggerType.HIGH_52W, "52W HIGH", levels.high_52w, dist))
 
         # 3. Donchian 50 High Breakout
-        if levels.donchian_50_high > 0 and price > levels.donchian_50_high and tick.p_change >= 0 and did_hit_recent_buy(levels.donchian_50_high):
-            dist = ((price - levels.donchian_50_high) / levels.donchian_50_high) * 100.0
+        if levels.donchian_50_high > 0 and buy_price > levels.donchian_50_high and tick.p_change >= 0 and did_hit_recent_buy(levels.donchian_50_high):
+            dist = ((buy_price - levels.donchian_50_high) / levels.donchian_50_high) * 100.0
             if dist >= settings.MIN_DISTANCE_ABOVE_LEVEL_PCT and dist <= settings.MAX_DISTANCE_FROM_LEVEL_PCT:
                 signals.append(build_sig("BUY", TriggerType.DC50_HIGH, "DC50 BREAKOUT", levels.donchian_50_high, dist))
 
         # 4. Donchian 20 High Breakout
-        if levels.donchian_20_high > 0 and price > levels.donchian_20_high and tick.p_change >= 0 and did_hit_recent_buy(levels.donchian_20_high):
-            dist = ((price - levels.donchian_20_high) / levels.donchian_20_high) * 100.0
+        if levels.donchian_20_high > 0 and buy_price > levels.donchian_20_high and tick.p_change >= 0 and did_hit_recent_buy(levels.donchian_20_high):
+            dist = ((buy_price - levels.donchian_20_high) / levels.donchian_20_high) * 100.0
             if dist >= settings.MIN_DISTANCE_ABOVE_LEVEL_PCT and dist <= settings.MAX_DISTANCE_FROM_LEVEL_PCT:
                 signals.append(build_sig("BUY", TriggerType.DC20_HIGH, "DC20 BREAKOUT", levels.donchian_20_high, dist))
 
-        # 5. Supertrend Daily (10,1) Buy - Fresh Flip (Red -> Green) only
-        # Must be in positive territory today (p_change >= 0) and breaking above Supertrend level
-        is_std_1_buy_flip = (
-            tick.p_change >= 0 and (
-                (levels.st_daily_10_1_dir == -1 and price > levels.st_daily_10_1_val) or
-                (getattr(levels, "st_daily_10_1_flip", 0) == 1 and price >= levels.last_close)
-            )
-        )
+        # 5. Supertrend Daily (10,1) Buy - Fresh Intraday Flip (Red -> Green) only:
+        # Prior completed day was Bearish (dir == -1), and price breaks strictly above resistance level today with positive gain
+        is_std_1_buy_flip = (levels.st_daily_10_1_dir == -1 and buy_price > levels.st_daily_10_1_val and tick.p_change >= 0)
         if levels.st_daily_10_1_val > 0 and is_std_1_buy_flip and did_hit_recent_buy(levels.st_daily_10_1_val):
-            dist = ((price - levels.st_daily_10_1_val) / levels.st_daily_10_1_val) * 100.0
+            dist = ((buy_price - levels.st_daily_10_1_val) / levels.st_daily_10_1_val) * 100.0
             signals.append(build_sig("BUY", TriggerType.ST_DAILY_10_1_BUY, "ST DAILY (10,1) BUY FLIP", levels.st_daily_10_1_val, dist))
 
-        # 6. Supertrend Daily (10,2) Buy - Fresh Flip (Red -> Green) only
-        is_std_2_buy_flip = (
-            tick.p_change >= 0 and (
-                (levels.st_daily_10_2_dir == -1 and price > levels.st_daily_10_2_val) or
-                (getattr(levels, "st_daily_10_2_flip", 0) == 1 and price >= levels.last_close)
-            )
-        )
+        # 6. Supertrend Daily (10,2) Buy - Fresh Intraday Flip (Red -> Green) only:
+        is_std_2_buy_flip = (levels.st_daily_10_2_dir == -1 and buy_price > levels.st_daily_10_2_val and tick.p_change >= 0)
         if levels.st_daily_10_2_val > 0 and is_std_2_buy_flip and did_hit_recent_buy(levels.st_daily_10_2_val):
-            dist = ((price - levels.st_daily_10_2_val) / levels.st_daily_10_2_val) * 100.0
+            dist = ((buy_price - levels.st_daily_10_2_val) / levels.st_daily_10_2_val) * 100.0
             signals.append(build_sig("BUY", TriggerType.ST_DAILY_10_2_BUY, "ST DAILY (10,2) BUY FLIP", levels.st_daily_10_2_val, dist))
 
         # ==========================================
         # SELL / SHORT SIDE CONDITIONS (SEPARATE ALERTS)
         # ==========================================
         # 1. ATL Breakdown
-        if levels.atl_low > 0 and price < levels.atl_low and tick.p_change <= 0 and did_hit_recent_sell(levels.atl_low):
-            dist = -((levels.atl_low - price) / levels.atl_low) * 100.0
+        if levels.atl_low > 0 and sell_price < levels.atl_low and tick.p_change <= 0 and did_hit_recent_sell(levels.atl_low):
+            dist = -((levels.atl_low - sell_price) / levels.atl_low) * 100.0
             signals.append(build_sig("SELL", TriggerType.ATL, "ATL BREAKDOWN", levels.atl_low, dist))
 
         # 2. 52W Low Breakdown
-        if levels.low_52w > 0 and price < levels.low_52w and tick.p_change <= 0 and did_hit_recent_sell(levels.low_52w):
-            dist = -((levels.low_52w - price) / levels.low_52w) * 100.0
+        if levels.low_52w > 0 and sell_price < levels.low_52w and tick.p_change <= 0 and did_hit_recent_sell(levels.low_52w):
+            dist = -((levels.low_52w - sell_price) / levels.low_52w) * 100.0
             signals.append(build_sig("SELL", TriggerType.LOW_52W, "52W LOW BREAKDOWN", levels.low_52w, dist))
 
         # 3. Donchian 50 Low Breakdown
-        if levels.donchian_50_low > 0 and price < levels.donchian_50_low and tick.p_change <= 0 and did_hit_recent_sell(levels.donchian_50_low):
-            dist = -((levels.donchian_50_low - price) / levels.donchian_50_low) * 100.0
+        if levels.donchian_50_low > 0 and sell_price < levels.donchian_50_low and tick.p_change <= 0 and did_hit_recent_sell(levels.donchian_50_low):
+            dist = -((levels.donchian_50_low - sell_price) / levels.donchian_50_low) * 100.0
             signals.append(build_sig("SELL", TriggerType.DC50_LOW, "DC50 BREAKDOWN", levels.donchian_50_low, dist))
 
         # 4. Donchian 20 Low Breakdown
-        if levels.donchian_20_low > 0 and price < levels.donchian_20_low and tick.p_change <= 0 and did_hit_recent_sell(levels.donchian_20_low):
-            dist = -((levels.donchian_20_low - price) / levels.donchian_20_low) * 100.0
+        if levels.donchian_20_low > 0 and sell_price < levels.donchian_20_low and tick.p_change <= 0 and did_hit_recent_sell(levels.donchian_20_low):
+            dist = -((levels.donchian_20_low - sell_price) / levels.donchian_20_low) * 100.0
             signals.append(build_sig("SELL", TriggerType.DC20_LOW, "DC20 BREAKDOWN", levels.donchian_20_low, dist))
 
-        # 5. Supertrend Daily (10,1) Sell - Fresh Flip (Green -> Red) only
-        # Must be in negative territory today (p_change <= 0) and breaking below Supertrend level
-        is_std_1_sell_flip = (
-            tick.p_change <= 0 and (
-                (levels.st_daily_10_1_dir == 1 and price < levels.st_daily_10_1_val) or
-                (getattr(levels, "st_daily_10_1_flip", 0) == -1 and price <= levels.last_close)
-            )
-        )
+        # 5. Supertrend Daily (10,1) Sell - Fresh Intraday Flip (Green -> Red) only:
+        # Prior completed day was Bullish (dir == 1), and price breaks strictly below support level today with negative change
+        is_std_1_sell_flip = (levels.st_daily_10_1_dir == 1 and sell_price < levels.st_daily_10_1_val and tick.p_change <= 0)
         if levels.st_daily_10_1_val > 0 and is_std_1_sell_flip and did_hit_recent_sell(levels.st_daily_10_1_val):
-            dist = -((levels.st_daily_10_1_val - price) / levels.st_daily_10_1_val) * 100.0
+            dist = -((levels.st_daily_10_1_val - sell_price) / levels.st_daily_10_1_val) * 100.0
             signals.append(build_sig("SELL", TriggerType.ST_DAILY_10_1_SELL, "ST DAILY (10,1) SELL FLIP", levels.st_daily_10_1_val, dist))
 
-        # 6. Supertrend Daily (10,2) Sell - Fresh Flip (Green -> Red) only
-        is_std_2_sell_flip = (
-            tick.p_change <= 0 and (
-                (levels.st_daily_10_2_dir == 1 and price < levels.st_daily_10_2_val) or
-                (getattr(levels, "st_daily_10_2_flip", 0) == -1 and price <= levels.last_close)
-            )
-        )
+        # 6. Supertrend Daily (10,2) Sell - Fresh Intraday Flip (Green -> Red) only:
+        is_std_2_sell_flip = (levels.st_daily_10_2_dir == 1 and sell_price < levels.st_daily_10_2_val and tick.p_change <= 0)
         if levels.st_daily_10_2_val > 0 and is_std_2_sell_flip and did_hit_recent_sell(levels.st_daily_10_2_val):
-            dist = -((levels.st_daily_10_2_val - price) / levels.st_daily_10_2_val) * 100.0
+            dist = -((levels.st_daily_10_2_val - sell_price) / levels.st_daily_10_2_val) * 100.0
             signals.append(build_sig("SELL", TriggerType.ST_DAILY_10_2_SELL, "ST DAILY (10,2) SELL FLIP", levels.st_daily_10_2_val, dist))
 
         return signals
