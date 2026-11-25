@@ -281,3 +281,54 @@ def test_supertrend_daily_standalone_trigger():
     triggers = [s.trigger for s in sigs]
     assert TriggerType.ST_DAILY_10_1_BUY in triggers
     assert TriggerType.ST_DAILY_10_2_BUY in triggers
+
+
+def test_red_stock_cannot_trigger_buy_and_green_cannot_trigger_sell():
+    """Verify that a stock down -4% can never trigger a BUY flip, and a stock up +4% can never trigger a SELL flip."""
+    levels = PrecomputedLevels(
+        symbol="ATHERENERG",
+        calculated_date=date.today(),
+        ath_high=2021.5,
+        ath_date="2026-11-16",
+        high_52w=2021.5,
+        high_52w_date="2026-11-16",
+        donchian_50_high=2021.5,
+        donchian_50_date="2026-11-16",
+        donchian_20_high=2021.5,
+        donchian_20_high_date="2026-11-16",
+        atl_low=288.15,
+        atl_date="2025-05-07",
+        low_52w=589.0,
+        low_52w_date="2026-01-21",
+        donchian_50_low=1345.7,
+        donchian_50_low_date="2026-10-26",
+        donchian_20_low=1345.7,
+        donchian_20_low_date="2026-10-26",
+        avg_vol_20d=1800000.0,
+        atr_20d=35.0,
+        last_close=1979.2,
+        sector="Automobile",
+        st_daily_10_1_val=1892.5,
+        st_daily_10_1_dir=1,
+        st_daily_10_1_flip=1,
+        st_daily_10_2_val=1829.14,
+        st_daily_10_2_dir=1
+    )
+
+    # Ather Energy is down -4.1% today
+    tick_red = PriceTick(
+        symbol="ATHERENERG",
+        ltp=1898.0,
+        day_high=1988.0,
+        day_low=1890.0,
+        day_open=1988.0,
+        prev_close=1979.2,
+        p_change=-4.1,
+        volume=1800000,
+        turnover_cr=340.0
+    )
+
+    sigs = breakout_detector.evaluate_breakouts(tick_red, levels)
+    buy_sigs = [s for s in sigs if s.side == "BUY"]
+    assert len(buy_sigs) == 0, "A stock falling -4.1% must NEVER trigger a BUY signal!"
+
